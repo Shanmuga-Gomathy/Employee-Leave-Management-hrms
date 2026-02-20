@@ -33,11 +33,7 @@ import java.time.LocalDate;
  * Transactional:
  *  - Ensures atomic execution of leave request creation.
  *
- * Logging Strategy:
- *  - info  → Major business actions
- *  - debug → Internal processing steps
- *  - warn  → Business validation warnings
- *  - error → Unexpected failures
+
  */
 @Service
 @Slf4j

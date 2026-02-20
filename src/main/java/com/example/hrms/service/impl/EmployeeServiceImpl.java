@@ -28,11 +28,7 @@ import java.util.List;
  *  - Fetch employees with pagination
  *  - Fetch employee by ID
  *
- * Logging Strategy:
- *  - info  → Major business operations
- *  - debug → Internal processing details
- *  - warn  → Suspicious but expected scenarios
- *  - error → Unexpected failures
+
  */
 @Service
 @Slf4j

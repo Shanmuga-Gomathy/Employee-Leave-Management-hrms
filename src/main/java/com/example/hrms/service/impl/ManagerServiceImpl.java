@@ -30,11 +30,7 @@ import org.springframework.stereotype.Service;
  * Security:
  *  - These operations are intended to be accessed only by MANAGER role.
  *
- * Logging Strategy:
- *  - info  → Major business operations
- *  - debug → Internal processing steps
- *  - warn  → Business rule violations
- *  - error → Resource not found / critical issues
+
  */
 @Service
 @Slf4j

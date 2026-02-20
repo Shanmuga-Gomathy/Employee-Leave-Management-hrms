@@ -2,51 +2,78 @@ package com.example.hrms.service.impl;
 
 import com.example.hrms.dto.LeaveRequestDTO;
 import com.example.hrms.entity.*;
+import com.example.hrms.exception.InvalidRequestException;
+import com.example.hrms.exception.ResourceNotFoundException;
+import com.example.hrms.mapper.LeaveRequestMapper;
 import com.example.hrms.repository.EmployeesRepository;
 import com.example.hrms.repository.LeaveBalanceRepository;
 import com.example.hrms.repository.LeaveRequestRepository;
 import com.example.hrms.repository.LeaveTypeRepository;
 import com.example.hrms.service.LeaveRequestService;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * LeaveRequestServiceImpl
  *
- * Handles leave request business logic.
- * - Apply leave
- * - Validate leave rules
- * - Check leave balance
- * - Fetch leave history
- * - Convert Entity to DTO
+ * Service layer responsible for Leave Request operations.
+ *
+ * Responsibilities:
+ *  - Apply leave
+ *  - Validate business rules
+ *  - Verify leave balance
+ *  - Fetch paginated leave history
+ *
+ * Transactional:
+ *  - Ensures atomic execution of leave request creation.
+ *
+ * Logging Strategy:
+ *  - info  → Major business actions
+ *  - debug → Internal processing steps
+ *  - warn  → Business validation warnings
+ *  - error → Unexpected failures
  */
 @Service
 @Slf4j
+@Transactional
 public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final EmployeesRepository employeesRepository;
     private final LeaveBalanceRepository leaveBalanceRepository;
     private final LeaveTypeRepository leaveTypeRepository;
+    private final LeaveRequestMapper leaveRequestMapper;
 
     public LeaveRequestServiceImpl(
             LeaveRequestRepository leaveRequestRepository,
             EmployeesRepository employeesRepository,
             LeaveBalanceRepository leaveBalanceRepository,
-            LeaveTypeRepository leaveTypeRepository) {
+            LeaveTypeRepository leaveTypeRepository,
+            LeaveRequestMapper leaveRequestMapper) {
 
         this.leaveRequestRepository = leaveRequestRepository;
         this.employeesRepository = employeesRepository;
         this.leaveBalanceRepository = leaveBalanceRepository;
         this.leaveTypeRepository = leaveTypeRepository;
+        this.leaveRequestMapper = leaveRequestMapper;
     }
 
-    // Apply leave for an employee
+    /**
+     * Applies leave for an employee.
+     *
+     * Validations:
+     *  - Date range validation
+     *  - Employee existence
+     *  - Leave type validation
+     *  - Leave balance availability
+     *  - Working days calculation (excludes weekends)
+     */
     @Override
     public LeaveRequestDTO applyLeave(Long employeeId,
                                       String leaveTypeName,
@@ -54,42 +81,54 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                                       LocalDate endDate,
                                       String reason) {
 
-        log.info("Applying leave for employeeId: {}, leaveType: {}", employeeId, leaveTypeName);
+        log.info("Applying leave for employeeId: {}", employeeId);
 
         if (endDate.isBefore(startDate)) {
-            log.warn("Invalid date range: {} to {}", startDate, endDate);
-            throw new RuntimeException("Invalid date range");
+            log.warn("Invalid date range: {} - {}", startDate, endDate);
+            throw new InvalidRequestException("End date cannot be before start date");
         }
 
         Employee employee = employeesRepository.findById(employeeId)
                 .orElseThrow(() -> {
                     log.error("Employee not found with id: {}", employeeId);
-                    return new RuntimeException("Employee not found");
+                    return new ResourceNotFoundException(
+                            "Employee not found with id: " + employeeId);
                 });
 
-        LeaveType leaveType = leaveTypeRepository
-                .findByName(LeaveTypeEnum.valueOf(leaveTypeName))
+        LeaveTypeEnum leaveTypeEnum;
+        try {
+            leaveTypeEnum = LeaveTypeEnum.valueOf(leaveTypeName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid leave type received: {}", leaveTypeName);
+            throw new InvalidRequestException("Invalid leave type: " + leaveTypeName);
+        }
+
+        LeaveType leaveType = leaveTypeRepository.findByName(leaveTypeEnum)
                 .orElseThrow(() -> {
-                    log.error("Leave type not found: {}", leaveTypeName);
-                    return new RuntimeException("Leave type not found");
+                    log.error("Leave type not configured: {}", leaveTypeEnum);
+                    return new InvalidRequestException("Leave type not configured");
                 });
 
         LeaveBalance balance = leaveBalanceRepository
                 .findByEmployeeAndLeaveType(employee, leaveType)
                 .orElseThrow(() -> {
-                    log.error("Leave balance not found for employeeId: {} and leaveType: {}",
-                            employeeId, leaveTypeName);
-                    return new RuntimeException("Leave balance not found");
+                    log.error("Leave balance not found for employeeId: {}", employeeId);
+                    return new InvalidRequestException("Leave balance not found");
                 });
 
-        int days = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        int days = calculateWorkingDays(startDate, endDate);
 
-        log.info("Requested leave days: {}, Remaining balance: {}",
-                days, balance.getRemainingDays());
+        log.debug("Calculated working days: {}", days);
+
+        if (days <= 0) {
+            log.warn("Selected dates contain no working days");
+            throw new InvalidRequestException("Selected dates contain no working days");
+        }
 
         if (balance.getRemainingDays() < days) {
-            log.warn("Insufficient leave balance for employeeId: {}", employeeId);
-            throw new RuntimeException("Insufficient leave balance");
+            log.warn("Insufficient leave balance. Available: {}, Requested: {}",
+                    balance.getRemainingDays(), days);
+            throw new InvalidRequestException("Insufficient leave balance");
         }
 
         LeaveRequest request = new LeaveRequest();
@@ -105,39 +144,55 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         log.info("Leave request created successfully with ID: {}", saved.getId());
 
-        return convertToDTO(saved);
+        return leaveRequestMapper.toDTO(saved);
     }
 
-    // Fetch leave history for employee
+    /**
+     * Fetches paginated leave history for an employee.
+     */
     @Override
-    public List<LeaveRequestDTO> getLeaveHistory(Long employeeId) {
+    public Page<LeaveRequestDTO> getLeaveHistory(Long employeeId, int page, int size) {
 
         log.info("Fetching leave history for employeeId: {}", employeeId);
 
-        List<LeaveRequestDTO> history = leaveRequestRepository
-                .findByEmployeeId(employeeId)
-                .stream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+        if (!employeesRepository.existsById(employeeId)) {
+            log.error("Employee not found while fetching history. ID: {}", employeeId);
+            throw new ResourceNotFoundException(
+                    "Employee not found with id: " + employeeId);
+        }
 
-        log.info("Total leave records found: {}", history.size());
+        Pageable pageable = PageRequest.of(page, size);
 
-        return history;
+        Page<LeaveRequest> leavePage =
+                leaveRequestRepository.findByEmployeeId(employeeId, pageable);
+
+        log.debug("Fetched {} leave records", leavePage.getNumberOfElements());
+
+        return leavePage.map(leaveRequestMapper::toDTO);
     }
 
-    // Convert LeaveRequest entity to DTO
-    private LeaveRequestDTO convertToDTO(LeaveRequest request) {
+    /**
+     * Calculates working days between two dates.
+     * Excludes Saturday and Sunday.
+     */
+    private int calculateWorkingDays(LocalDate startDate, LocalDate endDate) {
 
-        LeaveRequestDTO dto = new LeaveRequestDTO();
-        dto.setId(request.getId());
-        dto.setEmployeeId(request.getEmployee().getId());
-        dto.setLeaveType(request.getLeaveType());
-        dto.setStartDate(request.getStartDate());
-        dto.setEndDate(request.getEndDate());
-        dto.setTotalDays(request.getTotalDays());
-        dto.setStatus(request.getStatus());
-        dto.setReason(request.getReason());
+        int workingDays = 0;
+        LocalDate date = startDate;
 
-        return dto;
+        while (!date.isAfter(endDate)) {
+
+            switch (date.getDayOfWeek()) {
+                case SATURDAY:
+                case SUNDAY:
+                    break;
+                default:
+                    workingDays++;
+            }
+
+            date = date.plusDays(1);
+        }
+
+        return workingDays;
     }
 }

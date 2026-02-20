@@ -7,27 +7,19 @@ import lombok.Setter;
 
 import java.time.LocalDate;
 
-/*
- This DTO is used to send and receive leave request data.
-
- It contains:
- - Leave request ID
- - Employee ID
- - Leave type
- - Start date
- - End date
- - Total number of leave days
- - Leave status (PENDING, APPROVED, REJECTED)
- - Reason for leave
-
- This DTO is used in:
- - Applying for leave
- - Viewing leave history
- - Manager approval or rejection
-*/
+/**
+ * LeaveRequestDTO
+ *
+ * Data Transfer Object used to transfer leave request data
+ * between controller and service layers.
+ *
+ * This DTO does NOT expose entity objects directly.
+ * It only contains primitive and safe values.
+ */
 @Getter
 @Setter
 public class LeaveRequestDTO {
+
     private Long id;
     private Long employeeId;
     private LeaveType leaveType;

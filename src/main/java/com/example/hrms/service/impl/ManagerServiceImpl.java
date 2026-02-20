@@ -6,24 +6,35 @@ import com.example.hrms.entity.LeaveRequest;
 import com.example.hrms.entity.LeaveStatus;
 import com.example.hrms.exception.InvalidRequestException;
 import com.example.hrms.exception.ResourceNotFoundException;
+import com.example.hrms.mapper.LeaveRequestMapper;
 import com.example.hrms.repository.LeaveBalanceRepository;
 import com.example.hrms.repository.LeaveRequestRepository;
 import com.example.hrms.service.ManagerService;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * ManagerServiceImpl
  *
- * Handles manager operations:
- *  - View pending leave requests
- *  - Approve leave requests
+ * Service layer responsible for Manager operations.
+ *
+ * Responsibilities:
+ *  - View all pending leave requests (Paginated)
+ *  - Approve leave requests (with balance deduction)
  *  - Reject leave requests
  *
- * These operations are secured and accessible only by MANAGER role.
+ * Security:
+ *  - These operations are intended to be accessed only by MANAGER role.
+ *
+ * Logging Strategy:
+ *  - info  → Major business operations
+ *  - debug → Internal processing steps
+ *  - warn  → Business rule violations
+ *  - error → Resource not found / critical issues
  */
 @Service
 @Slf4j
@@ -31,31 +42,42 @@ public class ManagerServiceImpl implements ManagerService {
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final LeaveBalanceRepository leaveBalanceRepository;
+    private final LeaveRequestMapper leaveRequestMapper;
 
     public ManagerServiceImpl(LeaveRequestRepository leaveRequestRepository,
-                              LeaveBalanceRepository leaveBalanceRepository) {
+                              LeaveBalanceRepository leaveBalanceRepository,
+                              LeaveRequestMapper leaveRequestMapper) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.leaveBalanceRepository = leaveBalanceRepository;
+        this.leaveRequestMapper = leaveRequestMapper;
     }
 
-    // Fetch all pending leave requests
+    /**
+     * Fetch all pending leave requests (Paginated).
+     */
     @Override
-    public List<LeaveRequestDTO> getPendingRequests() {
+    public Page<LeaveRequestDTO> getPendingRequests(int page, int size) {
 
-        log.info("Fetching all pending leave requests");
+        log.info("Fetching pending leave requests - page: {}, size: {}", page, size);
 
-        List<LeaveRequestDTO> pendingList = leaveRequestRepository
-                .findByStatus(LeaveStatus.PENDING)
-                .stream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, size);
 
-        log.info("Total pending requests found: {}", pendingList.size());
+        Page<LeaveRequest> pendingPage =
+                leaveRequestRepository.findByStatus(LeaveStatus.PENDING, pageable);
 
-        return pendingList;
+        log.debug("Fetched {} pending requests", pendingPage.getNumberOfElements());
+
+        return pendingPage.map(leaveRequestMapper::toDTO);
     }
 
-    // Approve leave request and deduct balance
+    /**
+     * Approves leave request and deducts leave balance.
+     *
+     * Transactional:
+     *  - Ensures balance deduction and status update
+     *    happen atomically.
+     */
+    @Transactional
     @Override
     public LeaveRequestDTO approveLeave(Long requestId) {
 
@@ -63,7 +85,7 @@ public class ManagerServiceImpl implements ManagerService {
 
         LeaveRequest request = leaveRequestRepository.findById(requestId)
                 .orElseThrow(() -> {
-                    log.error("Leave request not found with ID: {}", requestId);
+                    log.error("Leave request not found with id: {}", requestId);
                     return new ResourceNotFoundException(
                             "Leave request not found with id: " + requestId);
                 });
@@ -79,27 +101,34 @@ public class ManagerServiceImpl implements ManagerService {
                         request.getLeaveType()
                 )
                 .orElseThrow(() -> {
-                    log.error("Leave balance not found for employee ID: {}",
-                            request.getEmployee().getId());
+                    log.error("Leave balance not found for employee during approval");
                     return new ResourceNotFoundException("Leave balance not found");
                 });
 
-        balance.setRemainingDays(
-                balance.getRemainingDays() - request.getTotalDays()
-        );
+        if (balance.getRemainingDays() < request.getTotalDays()) {
+            log.warn("Insufficient balance during approval. Available: {}, Required: {}",
+                    balance.getRemainingDays(), request.getTotalDays());
+            throw new InvalidRequestException("Insufficient leave balance during approval");
+        }
 
+        // Deduct balance
+        int updatedBalance = balance.getRemainingDays() - request.getTotalDays();
+        balance.setRemainingDays(updatedBalance);
         leaveBalanceRepository.save(balance);
 
-        request.setStatus(LeaveStatus.APPROVED);
+        log.debug("Leave balance updated. New balance: {}", updatedBalance);
 
+        request.setStatus(LeaveStatus.APPROVED);
         LeaveRequest saved = leaveRequestRepository.save(request);
 
         log.info("Leave request approved successfully for ID: {}", requestId);
 
-        return convertToDTO(saved);
+        return leaveRequestMapper.toDTO(saved);
     }
 
-    // Reject leave request
+    /**
+     * Rejects leave request.
+     */
     @Override
     public LeaveRequestDTO rejectLeave(Long requestId) {
 
@@ -107,7 +136,7 @@ public class ManagerServiceImpl implements ManagerService {
 
         LeaveRequest request = leaveRequestRepository.findById(requestId)
                 .orElseThrow(() -> {
-                    log.error("Leave request not found with ID: {}", requestId);
+                    log.error("Leave request not found with id: {}", requestId);
                     return new ResourceNotFoundException(
                             "Leave request not found with id: " + requestId);
                 });
@@ -118,28 +147,10 @@ public class ManagerServiceImpl implements ManagerService {
         }
 
         request.setStatus(LeaveStatus.REJECTED);
-
         LeaveRequest saved = leaveRequestRepository.save(request);
 
         log.info("Leave request rejected successfully for ID: {}", requestId);
 
-        return convertToDTO(saved);
-    }
-
-    // Convert Entity to DTO
-    private LeaveRequestDTO convertToDTO(LeaveRequest request) {
-
-        LeaveRequestDTO dto = new LeaveRequestDTO();
-
-        dto.setId(request.getId());
-        dto.setEmployeeId(request.getEmployee().getId());
-        dto.setLeaveType(request.getLeaveType());
-        dto.setStartDate(request.getStartDate());
-        dto.setEndDate(request.getEndDate());
-        dto.setTotalDays(request.getTotalDays());
-        dto.setStatus(request.getStatus());
-        dto.setReason(request.getReason());
-
-        return dto;
+        return leaveRequestMapper.toDTO(saved);
     }
 }

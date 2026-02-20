@@ -4,24 +4,35 @@ import com.example.hrms.dto.EmployeeRequestDTO;
 import com.example.hrms.dto.EmployeeResponseDTO;
 import com.example.hrms.entity.*;
 import com.example.hrms.exception.ResourceNotFoundException;
+import com.example.hrms.mapper.EmployeeMapper;
 import com.example.hrms.repository.EmployeesRepository;
 import com.example.hrms.repository.LeaveBalanceRepository;
 import com.example.hrms.repository.LeaveTypeRepository;
 import com.example.hrms.service.EmployeeService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * EmployeeServiceImpl
  *
- * Handles employee business logic.
- * - Creates employees
- * - Initializes leave balances
- * - Fetches employee details
- * - Converts Entity to DTO
+ * Service implementation for Employee operations.
+ *
+ * Responsibilities:
+ *  - Create employee
+ *  - Initialize leave balances based on department
+ *  - Fetch employees with pagination
+ *  - Fetch employee by ID
+ *
+ * Logging Strategy:
+ *  - info  → Major business operations
+ *  - debug → Internal processing details
+ *  - warn  → Suspicious but expected scenarios
+ *  - error → Unexpected failures
  */
 @Service
 @Slf4j
@@ -30,39 +41,54 @@ public class EmployeeServiceImpl implements EmployeeService {
     private final EmployeesRepository repository;
     private final LeaveTypeRepository leaveTypeRepository;
     private final LeaveBalanceRepository leaveBalanceRepository;
+    private final EmployeeMapper employeeMapper;
 
     public EmployeeServiceImpl(EmployeesRepository repository,
                                LeaveTypeRepository leaveTypeRepository,
-                               LeaveBalanceRepository leaveBalanceRepository) {
+                               LeaveBalanceRepository leaveBalanceRepository,
+                               EmployeeMapper employeeMapper) {
         this.repository = repository;
-        this.leaveBalanceRepository = leaveBalanceRepository;
         this.leaveTypeRepository = leaveTypeRepository;
+        this.leaveBalanceRepository = leaveBalanceRepository;
+        this.employeeMapper = employeeMapper;
     }
 
-    // Create new employee and initialize leave balances
+    /**
+     * Creates a new employee and initializes leave balances.
+     */
     @Override
     public EmployeeResponseDTO createEmployee(EmployeeRequestDTO request) {
 
-        log.info("Creating employee with email: {}", request.getEmail());
+        log.info("Starting employee creation process for email: {}", request.getEmail());
 
-        Employee employee = new Employee();
-        employee.setName(request.getName());
-        employee.setEmail(request.getEmail());
-        employee.setDepartment(request.getDepartment());
-        employee.setActive(true);
+        try {
+            // Convert DTO to Entity
+            Employee employee = employeeMapper.toEntity(request);
+            employee.setActive(true);
 
-        Employee saved = repository.save(employee);
-        log.info("Employee saved with ID: {}", saved.getId());
+            log.debug("Saving employee entity to database");
+            Employee saved = repository.save(employee);
 
-        initializeLeaveBalances(saved);
+            log.debug("Initializing leave balances for employee ID: {}", saved.getId());
+            initializeLeaveBalances(saved);
 
-        return mapToResponse(saved);
+            log.info("Employee created successfully with ID: {}", saved.getId());
+
+            return employeeMapper.toResponseDTO(saved);
+
+        } catch (Exception ex) {
+            log.error("Error occurred while creating employee with email: {}",
+                    request.getEmail(), ex);
+            throw ex;
+        }
     }
 
-    // Initialize leave balances based on department rules
+    /**
+     * Initializes leave balances based on employee department.
+     */
     private void initializeLeaveBalances(Employee employee) {
 
-        log.info("Initializing leave balances for employee ID: {}", employee.getId());
+        log.debug("Fetching all leave types for initialization");
 
         List<LeaveType> leaveTypes = leaveTypeRepository.findAll();
 
@@ -71,8 +97,8 @@ public class EmployeeServiceImpl implements EmployeeService {
             int days = getInitialDays(employee.getDepartment(), leaveType.getName());
 
             if (days == 0) {
-                log.warn("Skipping leave type {} for employee ID {} (0 days)",
-                        leaveType.getName(), employee.getId());
+                log.debug("No initial leave assigned for type: {} and department: {}",
+                        leaveType.getName(), employee.getDepartment());
                 continue;
             }
 
@@ -83,16 +109,17 @@ public class EmployeeServiceImpl implements EmployeeService {
 
             leaveBalanceRepository.save(balance);
 
-            log.info("Initialized {} days for leave type {} for employee ID {}",
+            log.debug("Assigned {} days of {} leave to employee ID: {}",
                     days, leaveType.getName(), employee.getId());
         }
     }
 
-    // Define initial leave allocation rules
+    /**
+     * Returns initial leave days based on department and leave type.
+     */
     private int getInitialDays(Department department, LeaveTypeEnum leaveTypeEnum) {
 
         switch (department) {
-
             case CONSULTING:
             case SUPPORT:
             case DEVELOPMENT:
@@ -108,26 +135,33 @@ public class EmployeeServiceImpl implements EmployeeService {
                 break;
         }
 
+        log.warn("No leave configuration found for Department: {} and LeaveType: {}",
+                department, leaveTypeEnum);
+
         return 0;
     }
 
-    // Fetch all employees
+    /**
+     * Fetches all employees with pagination.
+     */
     @Override
-    public List<EmployeeResponseDTO> getAllEmployees() {
+    public Page<EmployeeResponseDTO> getAllEmployees(int page, int size) {
 
-        log.info("Fetching all employees");
+        log.info("Fetching employees - Page: {}, Size: {}", page, size);
 
-        List<EmployeeResponseDTO> employees = repository.findAll()
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, size);
 
-        log.info("Total employees fetched: {}", employees.size());
+        Page<EmployeeResponseDTO> result = repository.findAll(pageable)
+                .map(employeeMapper::toResponseDTO);
 
-        return employees;
+        log.debug("Fetched {} employees from database", result.getNumberOfElements());
+
+        return result;
     }
 
-    // Fetch employee by ID
+    /**
+     * Fetches employee by ID.
+     */
     @Override
     public EmployeeResponseDTO getEmployeeById(Long id) {
 
@@ -136,21 +170,12 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee employee = repository.findById(id)
                 .orElseThrow(() -> {
                     log.error("Employee not found with ID: {}", id);
-                    return new ResourceNotFoundException("Employee not found with id: " + id);
+                    return new ResourceNotFoundException(
+                            "Employee not found with id: " + id);
                 });
 
-        return mapToResponse(employee);
-    }
+        log.debug("Employee found with ID: {}", id);
 
-    // Convert Employee entity to Response DTO
-    private EmployeeResponseDTO mapToResponse(Employee employee) {
-
-        return new EmployeeResponseDTO(
-                employee.getId(),
-                employee.getName(),
-                employee.getEmail(),
-                employee.getDepartment(),
-                employee.isActive()
-        );
+        return employeeMapper.toResponseDTO(employee);
     }
 }

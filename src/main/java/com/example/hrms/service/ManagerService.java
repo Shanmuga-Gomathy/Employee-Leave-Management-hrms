@@ -1,6 +1,7 @@
 package com.example.hrms.service;
 
 import com.example.hrms.dto.LeaveRequestDTO;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 
@@ -19,7 +20,7 @@ import java.util.List;
  */
 public interface ManagerService {
     // Get all leave requests with PENDING status
-    List<LeaveRequestDTO> getPendingRequests();
+    Page<LeaveRequestDTO> getPendingRequests(int page, int size);
 
     // Approve leave request by request ID
     LeaveRequestDTO approveLeave(Long requestId);

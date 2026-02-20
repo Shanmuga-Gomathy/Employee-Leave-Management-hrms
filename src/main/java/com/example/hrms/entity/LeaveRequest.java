@@ -34,7 +34,6 @@ public class LeaveRequest {
     private LocalDate endDate;
 
     private int totalDays;
-
     //Current status of leave (PENDING, APPROVED, REJECTED)
     @Enumerated(EnumType.STRING)
     private LeaveStatus status;

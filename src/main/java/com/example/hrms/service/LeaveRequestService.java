@@ -4,6 +4,7 @@ import com.example.hrms.dto.LeaveRequestDTO;
 import com.example.hrms.entity.LeaveRequest;
 import com.example.hrms.entity.LeaveStatus;
 import com.example.hrms.entity.LeaveType;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -26,5 +27,5 @@ public interface LeaveRequestService {
                                String reason);
 
     // Get leave history by employee ID
-    List<LeaveRequestDTO> getLeaveHistory(Long employeeId);
+    Page<LeaveRequestDTO> getLeaveHistory(Long employeeId, int page, int size);
 }

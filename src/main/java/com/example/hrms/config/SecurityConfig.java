@@ -29,25 +29,42 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
-
         http
                 .csrf(csrf -> csrf.disable())
+
                 .authorizeHttpRequests(auth -> auth
+
+                        // Public URLs
                         .requestMatchers(
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
                                 "/api-docs/**",
-                                "/h2-console/**",
-                                "/employee-Api/v1/**",
-                                "/leave-request-api/v1/**"
+                                "/h2-console/**"
                         ).permitAll()
+
+                        // Employee APIs - accessible by EMPLOYEE and MANAGER
+                        .requestMatchers("/employee-Api/v1/**")
+                        .hasAnyRole("EMPLOYEE", "MANAGER")
+
+                        // Leave APIs - only EMPLOYEE
+                        .requestMatchers("/leave-request-api/v1/**")
+                        .hasRole("EMPLOYEE")
+
+                        // Manager APIs - only MANAGER
                         .requestMatchers("/manager-api/v1/**")
                         .hasRole("MANAGER")
+
+                        // All other requests denied
                         .anyRequest().denyAll()
                 )
+
                 .httpBasic(Customizer.withDefaults())
-                .headers(headers -> headers.frameOptions(frame -> frame.disable()));
+
+                // Needed for H2 Console
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.disable())
+                );
 
         return http.build();
     }

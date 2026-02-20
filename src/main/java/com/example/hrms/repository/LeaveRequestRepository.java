@@ -2,6 +2,8 @@ package com.example.hrms.repository;
 
 import com.example.hrms.entity.LeaveRequest;
 import com.example.hrms.entity.LeaveStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -14,7 +16,7 @@ import java.util.List;
  */
 public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long> {
     // Fetch all leave requests for a specific employee
-    List<LeaveRequest> findByEmployeeId(Long employeeId);
+    Page<LeaveRequest> findByEmployeeId(Long employeeId, Pageable pageable);
     // Fetch all leave requests by status (PENDING, APPROVED, REJECTED)
-    List<LeaveRequest> findByStatus(LeaveStatus status);
+    Page<LeaveRequest> findByStatus(LeaveStatus status, Pageable pageable);
 }

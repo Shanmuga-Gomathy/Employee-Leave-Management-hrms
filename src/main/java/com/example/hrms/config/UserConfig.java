@@ -31,6 +31,7 @@ public class UserConfig {
 
     /*
      This method creates an in-memory user.
+     Example:
      Username  : manager
      Password  : manager123 (encrypted)
      Role      : MANAGER
@@ -38,11 +39,18 @@ public class UserConfig {
     @Bean
     public InMemoryUserDetailsManager userDetailsService(PasswordEncoder passwordEncoder) {
 
+        // Manager User
         UserDetails manager = User.withUsername("manager")
                 .password(passwordEncoder.encode("manager123"))
                 .roles("MANAGER")
                 .build();
 
-        return new InMemoryUserDetailsManager(manager);
+        // Employee User
+        UserDetails employee = User.withUsername("employee")
+                .password(passwordEncoder.encode("employee123"))
+                .roles("EMPLOYEE")
+                .build();
+
+        return new InMemoryUserDetailsManager(manager, employee);
     }
 }

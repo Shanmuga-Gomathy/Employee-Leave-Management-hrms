@@ -5,6 +5,7 @@ import com.example.hrms.dto.EmployeeResponseDTO;
 import com.example.hrms.service.EmployeeService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -52,15 +53,11 @@ public class EmployeeController {
      This API returns the list of all employees.
     */
     @GetMapping("/employees")
-    public List<EmployeeResponseDTO> getAllEmployees() {
-
-        log.info("Fetching all employees");
-
-        List<EmployeeResponseDTO> employees = service.getAllEmployees();
-
-        log.info("Total employees fetched: {}", employees.size());
-
-        return employees;
+    public Page<EmployeeResponseDTO> getAllEmployees(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size
+    ) {
+        return service.getAllEmployees(page, size);
     }
 
     /*

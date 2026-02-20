@@ -10,4 +10,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * Provides basic CRUD operations using JPA.
  */
 public interface EmployeesRepository extends JpaRepository<Employee,Long> {
+    boolean existsByEmail(String email);
 }

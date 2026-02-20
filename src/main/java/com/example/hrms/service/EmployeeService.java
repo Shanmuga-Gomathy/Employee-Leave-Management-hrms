@@ -2,6 +2,7 @@ package com.example.hrms.service;
 
 import com.example.hrms.dto.EmployeeRequestDTO;
 import com.example.hrms.dto.EmployeeResponseDTO;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -16,12 +17,10 @@ import java.util.List;
  */
 @Service
 public interface EmployeeService {
-    // Create a new employee
+
     EmployeeResponseDTO createEmployee(EmployeeRequestDTO request);
 
-    // Fetch all employees
-    List<EmployeeResponseDTO> getAllEmployees();
+    Page<EmployeeResponseDTO> getAllEmployees(int page, int size);
 
-    // Fetch employee by ID
     EmployeeResponseDTO getEmployeeById(Long id);
 }

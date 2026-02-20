@@ -3,6 +3,7 @@ package com.example.hrms.controller;
 import com.example.hrms.dto.LeaveRequestDTO;
 import com.example.hrms.service.LeaveRequestService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -60,14 +61,15 @@ public class LeaveRequestController {
      This API returns leave history for a specific employee.
     */
     @GetMapping("/history")
-    public List<LeaveRequestDTO> getHistory(@RequestParam Long employeeId) {
+    public Page<LeaveRequestDTO> getHistory(
+            @RequestParam Long employeeId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size
+    ) {
 
-        log.info("Fetching leave history for employeeId: {}", employeeId);
+        log.info("Fetching leave history for employeeId: {}, page: {}, size: {}",
+                employeeId, page, size);
 
-        List<LeaveRequestDTO> history = service.getLeaveHistory(employeeId);
-
-        log.info("Total leave records found: {}", history.size());
-
-        return history;
+        return service.getLeaveHistory(employeeId, page, size);
     }
 }
